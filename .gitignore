@@ -1,0 +1,35 @@
+# Python Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+backend/.venv/
+
+# Python Cache & Bytecode
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+backend/.pytest_cache/
+
+# Local SQLite Database & Logs
+*.db
+*.sqlite3
+backend/*.db
+backend/*.sqlite3
+*.log
+
+# Node & Frontend Build Artifacts
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.vite/
+frontend/.vite/
+
+# Editor & OS Artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
