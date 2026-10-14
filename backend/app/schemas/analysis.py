@@ -37,13 +37,33 @@ class Finding(BaseModel):
     end_line: Optional[int] = Field(default=None, description="Ending line number if available")
     end_column: Optional[int] = Field(default=None, description="Ending column number if available")
     code_snippet: Optional[str] = Field(default=None, description="Code snippet where the issue occurred")
+    what_detected: Optional[str] = Field(
+        default=None,
+        description="Plain-English summary of what AST defect or pattern was detected"
+    )
     why_it_matters: Optional[str] = Field(
         default=None,
         description="Educational explanation detailing the security/architectural impact of this issue"
     )
+    where_is_it: Optional[str] = Field(
+        default=None,
+        description="Human-readable location description (file and line)"
+    )
+    how_to_improve: Optional[str] = Field(
+        default=None,
+        description="Concrete remediation recommendation for Python developers"
+    )
+    safer_example: Optional[str] = Field(
+        default=None,
+        description="Code example demonstrating a safer, PEP-8 compliant approach"
+    )
+    verification_guide: Optional[str] = Field(
+        default=None,
+        description="Instructions on how to verify that this issue has been resolved"
+    )
     recommendation: Optional[str] = Field(
         default=None,
-        description="Suggested remedy or concrete best practice for Python developers"
+        description="Legacy alias for how_to_improve"
     )
     documentation_url: Optional[str] = Field(
         default=None,
@@ -157,5 +177,57 @@ class FindingExplanationResponse(BaseModel):
     is_ai_generated: bool
     disclaimer: str = (
         "AI-generated recommendations are advisory and must be reviewed by an engineer prior to implementation."
+    )
+
+
+class VerificationStatus(str, Enum):
+    RESOLVED = "RESOLVED"
+    STILL_DETECTED = "STILL_DETECTED"
+    NEW_FINDING = "NEW_FINDING"
+    INCONCLUSIVE = "INCONCLUSIVE"
+
+
+class VerifyFixRequest(BaseModel):
+    original_rule_id: str
+    original_line: Optional[int] = None
+    prior_score: int = 100
+    prior_finding_count: int = 1
+    updated_code: str = Field(..., min_length=1)
+    enable_ruff: bool = True
+    enable_bandit: bool = True
+
+
+class VerifyFixResponse(BaseModel):
+    status: VerificationStatus
+    rule_id: str
+    message: str
+    health_score_delta: int
+    prior_score: int
+    new_score: int
+    prior_finding_count: int
+    new_finding_count: int
+    subsequent_analysis: CodeAnalysisResponse
+    disclaimer: str = (
+        "Fix verification re-analyzes modified source code. "
+        "A RESOLVED finding indicates the specific static rule is no longer detected, "
+        "but does not guarantee complete absence of all runtime bugs or security risks."
+    )
+
+
+class ScanComparisonRequest(BaseModel):
+    base_scan_id: Optional[int] = None
+    subsequent_scan_id: Optional[int] = None
+
+
+class ScanComparisonResponse(BaseModel):
+    base_scan_id: Optional[int] = None
+    subsequent_scan_id: Optional[int] = None
+    resolved_count: int
+    remaining_count: int
+    new_count: int
+    score_delta: int
+    disclaimer: str = (
+        "Comparison evaluates changes between two discrete static analysis scans. "
+        "Different tool configurations or rule settings between scans may affect results."
     )
 

@@ -18,15 +18,24 @@ from app.config import (
     RATE_LIMIT_WINDOW_SECONDS,
     RUFF_PATH,
 )
-from app.database.session import get_dashboard_metrics, get_recent_scans, save_scan_record
+from app.database.session import (
+    get_dashboard_metrics,
+    get_recent_scans,
+    get_scan_by_id,
+    save_scan_record,
+)
 from app.schemas.analysis import (
     CodeAnalysisRequest,
     CodeAnalysisResponse,
     DashboardMetrics,
     FindingExplanationRequest,
     FindingExplanationResponse,
+    ScanComparisonRequest,
+    ScanComparisonResponse,
     ScanHistoryItem,
     SettingsInfo,
+    VerifyFixRequest,
+    VerifyFixResponse,
 )
 from app.services.coordinator import AnalysisCoordinator
 from app.services.ai_explainer import ai_explainer
@@ -127,10 +136,15 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
             detail=f"Code size ({code_bytes} bytes) exceeds maximum limit of {MAX_CODE_SIZE_BYTES} bytes (100 KB)."
         )
 
+    # Sanitize filename against path traversal
+    safe_filename = Path(payload.filename).name if payload.filename else "submission.py"
+    if not safe_filename or safe_filename in (".", ".."):
+        safe_filename = "submission.py"
+
     # Execute static analysis pipeline with tool selections
     response = coordinator.run_analysis(
         source_code=raw_code,
-        filename=payload.filename or "submission.py",
+        filename=safe_filename,
         enable_ruff=payload.enable_ruff,
         enable_bandit=payload.enable_bandit
     )
@@ -142,7 +156,7 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
     # Persist summary to SQLite database
     try:
         scan_id = save_scan_record(
-            filename=payload.filename or "submission.py",
+            filename=safe_filename,
             lines_analyzed=response.lines_analyzed,
             health_score=response.summary.health_score,
             health_grade=response.summary.health_grade,
@@ -199,6 +213,72 @@ async def list_recent_scans(limit: int = 15) -> List[ScanHistoryItem]:
 async def get_sample_codes():
     """Returns preset vulnerable and clean sample code for one-click testing."""
     return SAMPLE_CODES
+
+
+@router.post("/verify-fix", response_model=VerifyFixResponse)
+async def verify_fix_endpoint(payload: VerifyFixRequest) -> VerifyFixResponse:
+    """
+    Differentiating Feature: Fix Verification Engine (Explain. Fix. Verify.)
+    Re-scans modified Python code to verify whether a finding has been resolved.
+    """
+    raw_code = payload.updated_code
+    if not raw_code or not raw_code.strip():
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail="Updated code cannot be empty for fix verification."
+        )
+
+    code_bytes = len(raw_code.encode("utf-8"))
+    if code_bytes > MAX_CODE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413),
+            detail=f"Code size ({code_bytes} bytes) exceeds maximum limit of {MAX_CODE_SIZE_BYTES} bytes."
+        )
+
+    return coordinator.verify_fix(
+        original_rule_id=payload.original_rule_id,
+        updated_code=raw_code,
+        original_line=payload.original_line,
+        prior_score=payload.prior_score,
+        prior_finding_count=payload.prior_finding_count,
+        enable_ruff=payload.enable_ruff,
+        enable_bandit=payload.enable_bandit
+    )
+
+
+@router.post("/compare-scans", response_model=ScanComparisonResponse)
+async def compare_scans_endpoint(payload: ScanComparisonRequest) -> ScanComparisonResponse:
+    """
+    Compares two historical scans by their SQLite IDs to calculate resolved and remaining findings.
+    """
+    if payload.base_scan_id is None or payload.subsequent_scan_id is None:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail="Both base_scan_id and subsequent_scan_id must be provided."
+        )
+
+    base = get_scan_by_id(payload.base_scan_id)
+    subsequent = get_scan_by_id(payload.subsequent_scan_id)
+
+    if not base or not subsequent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or both of the specified scans could not be found in history."
+        )
+
+    score_delta = subsequent.health_score - base.health_score
+    resolved_count = max(0, base.total_findings - subsequent.total_findings) if subsequent.total_findings <= base.total_findings else 0
+    new_count = max(0, subsequent.total_findings - base.total_findings)
+    remaining_count = min(base.total_findings, subsequent.total_findings)
+
+    return ScanComparisonResponse(
+        base_scan_id=payload.base_scan_id,
+        subsequent_scan_id=payload.subsequent_scan_id,
+        resolved_count=resolved_count,
+        remaining_count=remaining_count,
+        new_count=new_count,
+        score_delta=score_delta
+    )
 
 
 @router.post("/explain-finding", response_model=FindingExplanationResponse)

@@ -9,6 +9,11 @@ from app.schemas.analysis import (
     ScanHistoryItem,
     DashboardMetrics,
     SettingsInfo,
+    VerificationStatus,
+    VerifyFixRequest,
+    VerifyFixResponse,
+    ScanComparisonRequest,
+    ScanComparisonResponse,
 )
 
 __all__ = [
@@ -22,4 +27,9 @@ __all__ = [
     "ScanHistoryItem",
     "DashboardMetrics",
     "SettingsInfo",
+    "VerificationStatus",
+    "VerifyFixRequest",
+    "VerifyFixResponse",
+    "ScanComparisonRequest",
+    "ScanComparisonResponse",
 ]

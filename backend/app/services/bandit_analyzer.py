@@ -18,7 +18,7 @@ from typing import List, Tuple
 
 from app.config import ANALYSIS_TIMEOUT_SECONDS, BANDIT_PATH
 from app.schemas.analysis import Finding, FindingCategory, FindingSeverity, ScannerTelemetry
-from app.services.recommendations import get_rule_details
+from app.services.recommendations import get_rule_details, get_rule_details_structured
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +92,8 @@ class BanditAnalyzer:
                     snippet = item.get("code").strip()
 
                 severity = self._map_severity(raw_severity, raw_confidence)
-                why_it_matters, recommendation, doc_url = get_rule_details(rule_id, message)
-                if item.get("more_info"):
-                    doc_url = item.get("more_info")
+                structured_details = get_rule_details_structured(rule_id, message, filename="submission.py", line=line_no)
+                doc_url = item.get("more_info") or structured_details.get("docs")
 
                 findings.append(
                     Finding(
@@ -107,8 +106,13 @@ class BanditAnalyzer:
                         line=line_no,
                         column=None,
                         code_snippet=snippet,
-                        why_it_matters=why_it_matters,
-                        recommendation=recommendation,
+                        what_detected=structured_details.get("what_detected"),
+                        why_it_matters=structured_details.get("why_it_matters"),
+                        where_is_it=structured_details.get("where_is_it"),
+                        how_to_improve=structured_details.get("how_to_improve"),
+                        safer_example=structured_details.get("safer_example"),
+                        verification_guide=structured_details.get("verification_guide"),
+                        recommendation=structured_details.get("how_to_improve"),
                         documentation_url=doc_url,
                     )
                 )

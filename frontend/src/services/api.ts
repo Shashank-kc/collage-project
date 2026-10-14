@@ -99,3 +99,80 @@ export async function checkBackendHealth(): Promise<HealthCheckResponse | null> 
     return null;
   }
 }
+
+export async function verifyFix(payload: {
+  original_rule_id: string;
+  original_line?: number | null;
+  prior_score?: number;
+  prior_finding_count?: number;
+  updated_code: string;
+  enable_ruff?: boolean;
+  enable_bandit?: boolean;
+}) {
+  const response = await fetch(`${API_BASE}/verify-fix`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let errorMsg = 'Failed to verify fix.';
+    try {
+      const errorJson = await response.json();
+      if (errorJson.detail) {
+        errorMsg = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail);
+      }
+    } catch {
+      errorMsg = `Server error (${response.status}: ${response.statusText})`;
+    }
+    throw new ApiError(response.status, errorMsg);
+  }
+
+  return response.json();
+}
+
+export async function compareScans(baseScanId: number, subsequentScanId: number) {
+  const response = await fetch(`${API_BASE}/compare-scans`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      base_scan_id: baseScanId,
+      subsequent_scan_id: subsequentScanId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Unable to compare scans.');
+  }
+
+  return response.json();
+}
+
+export async function explainFinding(
+  ruleId: string,
+  message: string,
+  codeSnippet?: string | null
+) {
+  const response = await fetch(`${API_BASE}/explain-finding`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      rule_id: ruleId,
+      message,
+      code_snippet: codeSnippet || null,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Unable to generate explanation.');
+  }
+
+  return response.json();
+}
+

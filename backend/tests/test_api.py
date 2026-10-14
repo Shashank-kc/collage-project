@@ -141,3 +141,91 @@ def test_explain_finding_endpoint():
     assert "explanation" in data
     assert "disclaimer" in data
 
+
+def test_finding_structured_explain_fix_verify_fields():
+    code = "assert x == 1, 'error'\n"
+    response = client.post(
+        "/api/v1/analyze",
+        json={"code": code, "filename": "test_assert.py", "enable_ruff": True, "enable_bandit": True}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["findings"]) > 0
+    b101_finding = next((f for f in data["findings"] if f["rule_id"] == "B101"), None)
+    if b101_finding:
+        assert b101_finding["what_detected"] is not None
+        assert b101_finding["why_it_matters"] is not None
+        assert b101_finding["where_is_it"] is not None
+        assert b101_finding["how_to_improve"] is not None
+        assert b101_finding["safer_example"] is not None
+        assert b101_finding["verification_guide"] is not None
+
+
+def test_verify_fix_resolved():
+    # Initial vulnerable code with assert
+    # Updated code replaces assert with explicit exception
+    updated_code = (
+        "def check_token(token):\n"
+        "    if not token:\n"
+        "        raise ValueError('Token is required')\n"
+        "    return token\n"
+    )
+    response = client.post(
+        "/api/v1/verify-fix",
+        json={
+            "original_rule_id": "B101",
+            "prior_score": 75,
+            "prior_finding_count": 1,
+            "updated_code": updated_code,
+            "enable_ruff": True,
+            "enable_bandit": True
+        }
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "RESOLVED"
+    assert data["rule_id"] == "B101"
+    assert data["new_score"] >= data["prior_score"]
+    assert "subsequent_analysis" in data
+
+
+def test_verify_fix_still_detected():
+    # Code still contains the assert flaw
+    still_vulnerable_code = "assert 1 == 1\n"
+    response = client.post(
+        "/api/v1/verify-fix",
+        json={
+            "original_rule_id": "B101",
+            "prior_score": 75,
+            "prior_finding_count": 1,
+            "updated_code": still_vulnerable_code,
+            "enable_ruff": False,
+            "enable_bandit": True
+        }
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "STILL_DETECTED"
+    assert "still detected" in data["message"].lower()
+
+
+def test_compare_scans_endpoint():
+    # Submit first scan
+    res1 = client.post("/api/v1/analyze", json={"code": "import os\nimport sys\n", "filename": "s1.py"})
+    scan1_id = res1.json()["scan_id"]
+
+    # Submit second scan
+    res2 = client.post("/api/v1/analyze", json={"code": "import os\n", "filename": "s2.py"})
+    scan2_id = res2.json()["scan_id"]
+
+    response = client.post(
+        "/api/v1/compare-scans",
+        json={"base_scan_id": scan1_id, "subsequent_scan_id": scan2_id}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "resolved_count" in data
+    assert "remaining_count" in data
+    assert "score_delta" in data
+
+

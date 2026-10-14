@@ -1,5 +1,13 @@
 import React from 'react';
-import { ShieldCheck, PlusCircle, LayoutDashboard, Code2, History, Settings } from 'lucide-react';
+import {
+  ShieldCheck,
+  PlusCircle,
+  LayoutDashboard,
+  Code2,
+  History,
+  Settings,
+  GitCompare,
+} from 'lucide-react';
 import type { HealthCheckResponse } from '../types';
 
 export type ActiveTab = 'workspace' | 'dashboard' | 'history' | 'settings';
@@ -10,6 +18,7 @@ interface HeaderProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   onNewAnalysis: () => void;
+  onOpenComparison?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   onNewAnalysis,
+  onOpenComparison,
 }) => {
   const isHealthy = health?.status === 'healthy';
 
@@ -31,8 +41,9 @@ export const Header: React.FC<HeaderProps> = ({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="brand-title">CodeGuard AI</span>
-            <span className="brand-badge">v1.1</span>
+            <span className="brand-badge">v2.0</span>
           </div>
+          <div className="brand-tagline">Explain · Fix · Verify</div>
         </div>
       </div>
 
@@ -77,6 +88,18 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Header Actions & Status */}
       <div className="header-meta">
+        {onOpenComparison && (
+          <button
+            type="button"
+            className="btn-ghost-sm"
+            onClick={onOpenComparison}
+            title="Compare two scan runs"
+          >
+            <GitCompare size={14} style={{ color: 'var(--color-primary-electric)' }} />
+            <span>Compare</span>
+          </button>
+        )}
+
         <button
           type="button"
           className="btn-ghost-sm"

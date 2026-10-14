@@ -1,23 +1,40 @@
-# CodeGuard AI 🛡️
+# CodeGuard AI 2.0 🛡️
+> **Explain. Fix. Verify.**  
+> *Production-Grade Python Static Analysis & Guided Remediation Platform*
 
-**AI-Powered Python Code Review & Security Analysis Platform**
-
-CodeGuard AI is a full-stack developer tool designed to analyze Python source code for security vulnerabilities, software defects, and style anti-patterns using industry-grade static analysis tools (**Bandit** and **Ruff**).
+CodeGuard AI 2.0 is a modern, developer-centric static analysis platform. It empowers engineers and students to inspect Python source code for security vulnerabilities, software defects, and style anti-patterns, understand why issues matter through structured educational insights, apply reviewable fixes, and verify resolutions with subsequent AST scans.
 
 ---
 
-## 🚀 Key Features
+## 🌟 What's New in CodeGuard AI 2.0
 
-1. **Modern Developer Dashboard**: Dark-mode developer interface with responsive layouts, accessible contrast, and high-visibility status indicators.
-2. **Interactive Code Editor**: Line numbers, code size indicator, keyboard shortcuts (`Ctrl+Enter`), and sample code loaders.
-3. **Dual Static Analysis Engine**:
-   - **Bandit**: AST-based security vulnerability detection (hardcoded credentials, SQL injection vectors, dangerous `eval`/`exec`, insecure cryptographic algorithms like MD5).
-   - **Ruff**: Lightning-fast Rust-powered linter for code quality, unused variables/imports (`F401`), syntax errors, and PEP-8 conventions.
-4. **Actionable Findings & Recommendations**: Each issue includes rule codes, severity badges, offending code snippets, and beginner-friendly mentor remediations.
-5. **Code Health Scoring**: Computes an overall score (0–100) and letter grade (A–F) based on issue severity deductions.
-6. **Local Persistence**: Saves analysis runs in SQLite with a built-in History Viewer.
-7. **One-Click Samples**: Instantly switch between vulnerable and clean sample code.
-8. **Safe by Design**: Analyzes code using static Abstract Syntax Trees (AST). User code is **never executed** on the server.
+1. **Explain. Fix. Verify. Framework**:
+   - **What Was Detected?**: Clear plain-English summary of the AST flaw.
+   - **Why Does It Matter?**: Realistic risk assessment without exaggeration.
+   - **Where Is It?**: Precise source line and column markers.
+   - **How Can It Be Improved?**: Concrete, actionable remediation guidance.
+   - **Safer Code Pattern**: Production-ready code replacements.
+   - **How Can I Verify?**: Step-by-step guidance for subsequent verification.
+2. **Fix Verification Engine**:
+   - Apply proposed code remedies to the active editor with one click.
+   - Re-scan modified code and verify whether findings transitioned to:
+     - `RESOLVED`: Target rule is no longer detected (+ health score gain).
+     - `STILL_DETECTED`: Target rule remains present in modified code.
+     - `NEW_FINDING`: Target rule cleared, but other defects were introduced.
+     - `INCONCLUSIVE`: Subprocess execution timed out or failed.
+3. **3-Panel Professional Workspace**:
+   - **Left Panel**: Project explorer tree, preset test suites (Vulnerable vs Clean), active scanner indicators, and recent SQLite scans.
+   - **Center Panel**: High-performance editor with synchronized line numbers, line gutter issue markers, and live byte size meter.
+   - **Right Panel**: Searchable & sortable findings list + dedicated Fix Verification Inspector.
+4. **Scan Comparison Engine**:
+   - Compare any two historical scans from SQLite database.
+   - Computes resolved findings, remaining findings, new issues, and health score delta.
+5. **Security Hardening**:
+   - **Zero Code Execution**: Code is parsed exclusively via static AST compilers (**Ruff** & **Bandit**). Code is never imported or evaluated.
+   - **Directory Traversal Defense**: Strict filename sanitization using `Path(filename).name`.
+   - **In-Memory Rate Limiting**: Sliding-window rate limiter per client IP.
+   - **OWASP Security Headers**: Injects `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, and `Referrer-Policy`.
+   - **Isolated Temporary File Sandboxing**: Code files are inspected within dedicated temporary directories with automatic cleanup.
 
 ---
 
@@ -25,16 +42,16 @@ CodeGuard AI is a full-stack developer tool designed to analyze Python source co
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 18, TypeScript, Vite, Vanilla CSS |
+| **Frontend** | React 18, TypeScript, Vite, Vanilla CSS Design System |
 | **Backend** | Python 3.12, FastAPI, Uvicorn, Pydantic v2 |
-| **Security Scanner** | Bandit (`bandit -f json`) |
-| **Quality & Linter** | Ruff (`ruff check --output-format json`) |
+| **Security Scanner** | OpenStack Bandit (`bandit -f json`) |
+| **Quality & Linter** | Astral Ruff (`ruff check --output-format json`) |
 | **Database** | SQLite (built-in `sqlite3`) |
-| **Testing** | Pytest, HTTPX |
+| **Testing** | Pytest, HTTPX (25 automated integration tests) |
 
 ---
 
-## 📁 Project Architecture
+## 📁 Architecture Overview
 
 ```
 collage-project/
@@ -42,104 +59,103 @@ collage-project/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── __init__.py
-│   │   │   └── routes.py            # API endpoints (/analyze, /history, /samples, /health)
+│   │   │   └── routes.py            # API routes (/analyze, /verify-fix, /compare-scans, /history, /metrics, /settings)
 │   │   ├── database/
 │   │   │   ├── __init__.py
-│   │   │   └── session.py           # SQLite connection & scan history persistence
+│   │   │   └── session.py           # SQLite connection, history & aggregated analytics
+│   │   ├── middleware/
+│   │   │   ├── __init__.py
+│   │   │   └── security.py          # Rate limiting & OWASP security headers
 │   │   ├── schemas/
 │   │   │   ├── __init__.py
-│   │   │   └── analysis.py          # Pydantic models for validation & serialization
+│   │   │   └── analysis.py          # Pydantic models for Explain-Fix-Verify schemas
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   ├── bandit_analyzer.py   # Safe subprocess execution of Bandit
-│   │   │   ├── coordinator.py       # Orchestrates scans, scores & metrics
-│   │   │   ├── recommendations.py   # Educational knowledge base for rules
-│   │   │   └── ruff_analyzer.py     # Safe subprocess execution of Ruff
-│   │   ├── config.py                # Payload limits, tool paths, CORS
-│   │   └── main.py                  # FastAPI application entrypoint
+│   │   │   ├── bandit_analyzer.py   # Safe subprocess execution of Bandit AST
+│   │   │   ├── coordinator.py       # Orchestrates scans, health scores & fix verification
+│   │   │   ├── recommendations.py   # Structured Explain-Fix-Verify knowledge base
+│   │   │   ├── ruff_analyzer.py     # Safe subprocess execution of Ruff AST
+│   │   │   └── ai_explainer.py      # Optional advisory AI mentor service
+│   │   ├── config.py                # Payload limits, rate limits, CORS origins
+│   │   └── main.py                  # FastAPI entry point & lifespan events
 │   ├── tests/
-│   │   ├── test_api.py              # API endpoint integration tests
-│   │   ├── test_bandit.py           # Bandit scanner unit tests
-│   │   └── test_ruff.py             # Ruff linter unit tests
-│   └── requirements.txt             # Python dependencies
+│   │   ├── test_api.py              # API endpoint, verification, and comparison tests
+│   │   ├── test_bandit.py           # Bandit scanner tests
+│   │   ├── test_ruff.py             # Ruff linter tests
+│   │   └── test_security.py         # Rate limiting, temp file cleanup, and size limits
+│   ├── requirements.txt
+│   └── codeguard.db                 # Local SQLite database
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── CodeEditor.tsx       # Textarea with synchronized line numbers
-│   │   │   ├── FindingsList.tsx     # Filterable finding cards & snippets
-│   │   │   ├── FindingsSummary.tsx  # Health grade & metrics overview
-│   │   │   ├── Header.tsx           # Status badge & navigation header
-│   │   │   └── ScanHistoryModal.tsx # SQLite scan history dialog
+│   │   │   ├── CodeEditor.tsx           # Center code editor with line gutter markers
+│   │   │   ├── FindingsList.tsx         # Searchable, sortable finding cards
+│   │   │   ├── FindingsSummary.tsx      # Health score & metrics banner
+│   │   │   ├── FixVerificationPanel.tsx # 5-step Explain. Fix. Verify. inspector
+│   │   │   ├── Header.tsx               # Top header with navigation & compare action
+│   │   │   ├── WorkspaceSidebar.tsx     # Left collapsible project explorer
+│   │   │   ├── ScanComparisonModal.tsx  # Dual-scan comparison dialog
+│   │   │   ├── DashboardView.tsx        # Analytics KPIs & grade distribution
+│   │   │   ├── HistoryView.tsx          # Searchable SQLite history table
+│   │   │   └── SettingsView.tsx         # Engine controls & security limits
 │   │   ├── services/
-│   │   │   └── api.ts               # Fetch client communicating with backend
+│   │   │   └── api.ts                   # Type-safe API client
 │   │   ├── types/
-│   │   │   └── index.ts             # TypeScript interfaces
-│   │   ├── App.tsx                  # Main layout container
-│   │   ├── index.css                # Polished developer theme styles
-│   │   └── main.tsx                 # React DOM mount point
+│   │   │   └── index.ts                 # TypeScript interfaces
+│   │   ├── App.tsx                      # Main 3-panel workspace coordinator
+│   │   └── index.css                    # Design system (charcoal/navy, electric teal)
 │   ├── package.json
 │   ├── tsconfig.json
-│   └── vite.config.ts               # Dev server & API proxy configuration
+│   └── vite.config.ts
 │
-├── .gitignore                       # Ignores .venv, node_modules, and cache files
+├── .gitignore
 └── README.md
 ```
 
 ---
 
-## ⚡ Quick Start (Windows)
+## ⚡ Quick Start
 
-### 1. Clone & Enter Directory
+### 1. Start the FastAPI Backend
 ```powershell
-git clone https://github.com/Shashank-kc/collage-project.git
-cd collage-project
+cd "c:\Users\shashank\OneDrive\Desktop\collage project\backend"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+- API Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Health Check: [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)
 
-### 2. Set Up the Backend
+### 2. Start the Vite Frontend
 ```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-Run tests to ensure everything is configured properly:
-```powershell
-pytest -v
-```
-
-Start the backend API server:
-```powershell
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-API Documentation will be live at: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
-### 3. Set Up the Frontend (In a New Terminal)
-```powershell
-cd frontend
-npm install
+cd "c:\Users\shashank\OneDrive\Desktop\collage project\frontend"
 npm run dev
 ```
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+- Web Application: [http://localhost:5173](http://localhost:5173)
 
 ---
 
-## 🔒 Security & Safe Execution Notice
+## 🧪 Running Automated Tests
 
-- **No Code Execution**: Submitted Python code is strictly parsed by static analyzers as an Abstract Syntax Tree (AST) inside an isolated temporary directory. It is **never** imported, executed (`eval`/`exec`), or run directly.
-- **Payload Limits**: Requests exceeding 100 KB are rejected to prevent denial-of-service (DoS) attempts.
-- **Subprocess Isolation**: Analysis subprocesses run with strict timeouts (15 seconds) to prevent hanging.
+### Backend Test Suite (Pytest)
+```powershell
+cd "c:\Users\shashank\OneDrive\Desktop\collage project\backend"
+.\.venv\Scripts\pytest.exe -v
+```
+*Current test status: 25 passed, 0 failures.*
+
+### Frontend Production Build Test
+```powershell
+cd "c:\Users\shashank\OneDrive\Desktop\collage project\frontend"
+npm run build
+```
+*Current build status: Clean compilation (`tsc -b && vite build`) in < 1 second.*
 
 ---
 
-## ⚠️ Known Limitations & Disclaimer
+## 🔒 Security Architecture
 
-- **Static Analysis vs. Runtime Bugs**: Static analysis tools inspect structure and syntax; they cannot detect runtime state defects, complex algorithmic mistakes, or external service failures.
-- **Tool-Generated Results**: Findings are tool-generated indicators and should be treated as guidance, not formal verification guarantees.
-
----
-
-## 👨‍💻 Author & Acknowledgements
-- Built as an AI/ML Computer Science engineering project.
-- Powered by [FastAPI](https://fastapi.tiangolo.com/), [Ruff](https://docs.astral.sh/ruff/), [Bandit](https://bandit.readthedocs.io/), and [React](https://react.dev/).
+1. **Static AST Analysis**: Neither `eval()`, `exec()`, nor shell execution is used on submitted user code.
+2. **Subprocess Isolation**: Process arguments are passed as discrete vectors (`['ruff', 'check', ...]` and `['bandit', '-f', 'json', ...]`) with `shell=False`.
+3. **Execution Limits**: Configurable timeouts (15s) and payload size caps (100 KB) prevent DoS attacks.
+4. **Data Privacy**: Temporary files are erased immediately after scan completion. Only truncated code previews (up to 300 characters) are persisted in local SQLite history.
+5. **Disclaimer**: Static analysis detects structural and syntactic vulnerabilities but cannot prove software is 100% defect-free.

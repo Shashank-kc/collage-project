@@ -2,6 +2,8 @@ export type FindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
 
 export type FindingCategory = 'security' | 'quality' | 'style' | 'syntax';
 
+export type VerificationStatus = 'RESOLVED' | 'STILL_DETECTED' | 'NEW_FINDING' | 'INCONCLUSIVE';
+
 export interface Finding {
   id: string;
   tool: 'ruff' | 'bandit';
@@ -14,7 +16,12 @@ export interface Finding {
   end_line?: number | null;
   end_column?: number | null;
   code_snippet?: string | null;
+  what_detected?: string | null;
   why_it_matters?: string | null;
+  where_is_it?: string | null;
+  how_to_improve?: string | null;
+  safer_example?: string | null;
+  verification_guide?: string | null;
   recommendation?: string | null;
   documentation_url?: string | null;
 }
@@ -95,4 +102,49 @@ export interface HealthCheckResponse {
     ruff: { configured_path: string; available: boolean };
     bandit: { configured_path: string; available: boolean };
   };
+}
+
+export interface VerifyFixRequest {
+  original_rule_id: string;
+  original_line?: number | null;
+  prior_score?: number;
+  prior_finding_count?: number;
+  updated_code: string;
+  enable_ruff?: boolean;
+  enable_bandit?: boolean;
+}
+
+export interface VerifyFixResponse {
+  status: VerificationStatus;
+  rule_id: string;
+  message: string;
+  health_score_delta: number;
+  prior_score: number;
+  new_score: number;
+  prior_finding_count: number;
+  new_finding_count: number;
+  subsequent_analysis: CodeAnalysisResponse;
+  disclaimer: string;
+}
+
+export interface ScanComparisonRequest {
+  base_scan_id: number;
+  subsequent_scan_id: number;
+}
+
+export interface ScanComparisonResponse {
+  base_scan_id?: number | null;
+  subsequent_scan_id?: number | null;
+  resolved_count: number;
+  remaining_count: number;
+  new_count: number;
+  score_delta: number;
+  disclaimer: string;
+}
+
+export interface FindingExplanationResponse {
+  rule_id: string;
+  explanation: string;
+  is_ai_generated: boolean;
+  disclaimer: string;
 }

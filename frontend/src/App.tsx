@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Header, type ActiveTab } from './components/Header';
+import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { CodeEditor } from './components/CodeEditor';
 import { FindingsSummary } from './components/FindingsSummary';
 import { FindingsList } from './components/FindingsList';
+import { FixVerificationPanel } from './components/FixVerificationPanel';
+import { ScanComparisonModal } from './components/ScanComparisonModal';
 import { DashboardView } from './components/DashboardView';
 import { HistoryView } from './components/HistoryView';
 import { SettingsView } from './components/SettingsView';
@@ -13,20 +16,28 @@ import {
   fetchSampleCodes,
   fetchScanHistory,
   fetchSettings,
+  verifyFix,
   ApiError,
 } from './services/api';
 import type {
   CodeAnalysisResponse,
   DashboardMetrics,
+  Finding,
   HealthCheckResponse,
   ScanHistoryItem,
   SettingsInfo,
+  VerifyFixResponse,
 } from './types';
-import { AlertTriangle, Shield, Info } from 'lucide-react';
+import { AlertTriangle, Info, Wrench, ListFilter } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Navigation & View state
   const [activeTab, setActiveTab] = useState<ActiveTab>('workspace');
+
+  // 3-Panel Workspace state
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [rightPanelTab, setRightPanelTab] = useState<'findings' | 'inspector'>('findings');
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
 
   // Code & Analysis state
   const [code, setCode] = useState<string>('');
@@ -34,6 +45,13 @@ export const App: React.FC = () => {
   const [result, setResult] = useState<CodeAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
+
+  // Fix Verification Engine state
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [lastVerificationResult, setLastVerificationResult] = useState<VerifyFixResponse | null>(null);
+
+  // Scan Comparison state
+  const [showComparisonModal, setShowComparisonModal] = useState<boolean>(false);
 
   // Scanner options
   const [enableRuff, setEnableRuff] = useState<boolean>(true);
@@ -59,10 +77,12 @@ export const App: React.FC = () => {
 
         const samplesData = await fetchSampleCodes();
         setSamples(samplesData);
-        // Pre-fill vulnerable sample so the user has immediate interactive experience
         if (samplesData?.vulnerable) {
           setCode(samplesData.vulnerable);
         }
+
+        const historyData = await fetchScanHistory(10);
+        setHistory(historyData);
       } catch (err) {
         console.warn('Initial backend fetch warning:', err);
       } finally {
@@ -108,6 +128,10 @@ export const App: React.FC = () => {
   const handleLoadSample = (type: 'vulnerable' | 'clean') => {
     setError(null);
     setSelectedLine(null);
+    setSelectedFinding(null);
+    setLastVerificationResult(null);
+    setRightPanelTab('findings');
+
     if (samples && samples[type]) {
       setCode(samples[type]);
     } else {
@@ -150,6 +174,9 @@ export const App: React.FC = () => {
     setResult(null);
     setError(null);
     setSelectedLine(null);
+    setSelectedFinding(null);
+    setLastVerificationResult(null);
+    setRightPanelTab('findings');
     setActiveTab('workspace');
   };
 
@@ -158,10 +185,13 @@ export const App: React.FC = () => {
     setCode(codePreview);
     setResult(null);
     setSelectedLine(null);
+    setSelectedFinding(null);
+    setLastVerificationResult(null);
+    setRightPanelTab('findings');
     setActiveTab('workspace');
   };
 
-  // Run analysis
+  // Run full static analysis
   const handleAnalyze = async () => {
     if (!code.trim()) {
       setError('Please provide Python source code to analyze.');
@@ -176,10 +206,15 @@ export const App: React.FC = () => {
     setIsAnalyzing(true);
     setError(null);
     setSelectedLine(null);
+    setSelectedFinding(null);
+    setLastVerificationResult(null);
 
     try {
       const response = await analyzeCode(code, 'submission.py', enableRuff, enableBandit);
       setResult(response);
+      setRightPanelTab('findings');
+      // Refresh history silently
+      fetchScanHistory(10).then((h) => setHistory(h));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(`Analysis failed (${err.status}): ${err.message}`);
@@ -193,6 +228,62 @@ export const App: React.FC = () => {
     }
   };
 
+  // Select a finding to inspect in Fix Verification Panel
+  const handleSelectFinding = (finding: Finding) => {
+    setSelectedFinding(finding);
+    setRightPanelTab('inspector');
+    if (finding.line) {
+      setSelectedLine(finding.line);
+    }
+  };
+
+  // Apply proposed safer code snippet to editor
+  const handleApplyFixSnippet = (saferSnippet: string) => {
+    // If we have selected finding with code_snippet, replace that exact occurrence
+    if (selectedFinding?.code_snippet && code.includes(selectedFinding.code_snippet)) {
+      const updated = code.replace(selectedFinding.code_snippet, saferSnippet.trim());
+      setCode(updated);
+    } else {
+      // Append or replace cleanly
+      setCode((prev) => `${prev.trim()}\n\n# Verified Remediation Applied:\n${saferSnippet.trim()}\n`);
+    }
+  };
+
+  // Re-Scan & Verify Fix
+  const handleVerifyFix = async (ruleId: string, line?: number | null) => {
+    setIsVerifying(true);
+    try {
+      const verifyRes = await verifyFix({
+        original_rule_id: ruleId,
+        original_line: line,
+        prior_score: result?.summary.health_score || 100,
+        prior_finding_count: result?.findings.length || 1,
+        updated_code: code,
+        enable_ruff: enableRuff,
+        enable_bandit: enableBandit,
+      });
+
+      setLastVerificationResult(verifyRes);
+
+      // If the fix improved the code or resolved the issue, update the active analysis results!
+      if (verifyRes.subsequent_analysis) {
+        setResult(verifyRes.subsequent_analysis);
+      }
+
+      return verifyRes;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Fix verification failed.';
+      setError(`Verification error: ${msg}`);
+      return null;
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const lines = code.split('\n');
+  const lineCount = Math.max(lines.length, 1);
+  const byteSize = new Blob([code]).size;
+
   return (
     <div className="app-container">
       {/* Top Header */}
@@ -202,13 +293,29 @@ export const App: React.FC = () => {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onNewAnalysis={handleNewAnalysis}
+        onOpenComparison={() => setShowComparisonModal(true)}
       />
 
       {/* View Switcher Routing */}
       {activeTab === 'workspace' && (
-        <main className="workspace-grid">
-          {/* Left Column: Code Editor */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <main className="workspace-3panel-layout">
+          {/* Panel 1: Left Navigation & File Tree Sidebar */}
+          <WorkspaceSidebar
+            isOpen={sidebarOpen}
+            onToggle={() => setSidebarOpen((prev) => !prev)}
+            fileName="submission.py"
+            lineCount={lineCount}
+            byteSize={byteSize}
+            onLoadSample={handleLoadSample}
+            recentScans={history}
+            onSelectScan={handleSelectPastScan}
+            onNewAnalysis={handleNewAnalysis}
+            enableRuff={enableRuff}
+            enableBandit={enableBandit}
+          />
+
+          {/* Panel 2: Center Code Editor */}
+          <div className="workspace-center-panel">
             {error && (
               <div className="alert-banner alert-error" role="alert">
                 <AlertTriangle size={18} />
@@ -227,50 +334,93 @@ export const App: React.FC = () => {
               enableBandit={enableBandit}
               setEnableBandit={setEnableBandit}
               findings={result?.findings || []}
-              onSelectLineFinding={(line) => setSelectedLine(line === selectedLine ? null : line)}
+              onSelectLineFinding={(line) => {
+                setSelectedLine(line === selectedLine ? null : line);
+                const matching = result?.findings.find((f) => f.line === line);
+                if (matching) {
+                  setSelectedFinding(matching);
+                  setRightPanelTab('inspector');
+                }
+              }}
             />
           </div>
 
-          {/* Right Column: Findings & Metrics Panel */}
-          <div className="panel-card" style={{ flex: 1, minHeight: '520px' }}>
-            <div className="panel-header">
-              <div className="panel-title-group">
-                <Shield size={16} style={{ color: 'var(--color-primary-electric)' }} />
-                <span>Inspection Findings</span>
-                {result && (
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', fontWeight: 400 }}>
-                    ({result.lines_analyzed} lines analyzed)
-                  </span>
-                )}
+          {/* Panel 3: Right Findings & Fix Verification Panel */}
+          <div className="workspace-right-panel panel-card">
+            {/* Right Panel Header Tabs */}
+            <div className="panel-header" style={{ padding: '8px 14px' }}>
+              <div className="right-panel-tab-group">
+                <button
+                  type="button"
+                  className={`right-tab-btn ${rightPanelTab === 'findings' ? 'active' : ''}`}
+                  onClick={() => setRightPanelTab('findings')}
+                >
+                  <ListFilter size={14} />
+                  <span>Findings</span>
+                  {result && (
+                    <span className="tab-count-badge">
+                      {result.findings.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className={`right-tab-btn ${rightPanelTab === 'inspector' ? 'active' : ''}`}
+                  onClick={() => setRightPanelTab('inspector')}
+                >
+                  <Wrench size={14} style={{ color: 'var(--color-primary-electric)' }} />
+                  <span>Explain · Fix · Verify</span>
+                  {selectedFinding && (
+                    <span className="tab-active-dot" />
+                  )}
+                </button>
               </div>
 
               {selectedLine && (
                 <button
                   type="button"
                   className="btn-ghost-sm"
-                  onClick={() => setSelectedLine(null)}
+                  onClick={() => {
+                    setSelectedLine(null);
+                    setSelectedFinding(null);
+                  }}
                   title="Clear line filter"
                 >
-                  Clear Line {selectedLine} Filter
+                  Clear Line {selectedLine}
                 </button>
               )}
             </div>
 
-            {/* Metrics summary banner if a scan was completed */}
-            {result && (
-              <FindingsSummary
-                summary={result.summary}
-                executionTimeMs={result.execution_time_ms}
+            {/* Content View Based on Tab */}
+            {rightPanelTab === 'findings' ? (
+              <>
+                {result && (
+                  <FindingsSummary
+                    summary={result.summary}
+                    executionTimeMs={result.execution_time_ms}
+                  />
+                )}
+                <FindingsList
+                  findings={result?.findings || []}
+                  scanners={result?.scanners || []}
+                  hasScanned={result !== null}
+                  selectedLine={selectedLine}
+                  onSelectFinding={handleSelectFinding}
+                  selectedFindingId={selectedFinding?.id}
+                />
+              </>
+            ) : (
+              <FixVerificationPanel
+                finding={selectedFinding}
+                onClose={() => setRightPanelTab('findings')}
+                onApplyFixSnippet={handleApplyFixSnippet}
+                onVerifyFix={handleVerifyFix}
+                isVerifying={isVerifying}
+                lastVerificationResult={lastVerificationResult}
+                onClearVerificationResult={() => setLastVerificationResult(null)}
               />
             )}
-
-            {/* Detailed findings list */}
-            <FindingsList
-              findings={result?.findings || []}
-              scanners={result?.scanners || []}
-              hasScanned={result !== null}
-              selectedLine={selectedLine}
-            />
           </div>
         </main>
       )}
@@ -304,17 +454,24 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Persistent Disclaimer Bar */}
+      {/* Global Scan Comparison Modal */}
+      <ScanComparisonModal
+        isOpen={showComparisonModal}
+        onClose={() => setShowComparisonModal(false)}
+        history={history}
+      />
+
+      {/* Persistent Status / Disclaimer Bar */}
       <footer className="disclaimer-bar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Info size={14} style={{ color: 'var(--color-primary-electric)', flexShrink: 0 }} />
           <span>
             {result?.disclaimer ||
-              'Static analysis inspects code structure without execution. It aids defect detection but cannot guarantee 100% bug-free software.'}
+              'Static AST inspection analyzes code structure without execution. It aids defect detection but cannot guarantee 100% bug-free software.'}
           </span>
         </div>
         <div style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)', fontSize: '0.73rem' }}>
-          FastAPI · Ruff · Bandit · SQLite · Isolated AST
+          CodeGuard AI 2.0 · Explain. Fix. Verify. · Ruff & Bandit AST
         </div>
       </footer>
     </div>

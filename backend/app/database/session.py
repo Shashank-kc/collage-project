@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import logging
 import sqlite3
-from typing import Generator, List
+from typing import Generator, List, Optional
 
 from app.config import DATABASE_PATH
 from app.schemas.analysis import DashboardMetrics, ScanHistoryItem
@@ -134,6 +134,34 @@ def get_recent_scans(limit: int = 10) -> List[ScanHistoryItem]:
             )
         )
     return items
+
+
+def get_scan_by_id(scan_id: int) -> Optional[ScanHistoryItem]:
+    """Retrieves a single scan record by ID."""
+    with get_db_connection() as conn:
+        row = conn.execute("""
+            SELECT id, timestamp, status, total_findings, security_findings,
+                   quality_findings, health_score, health_grade,
+                   execution_time_ms, code_preview
+            FROM scans
+            WHERE id = ?
+        """, (scan_id,)).fetchone()
+
+    if not row:
+        return None
+
+    return ScanHistoryItem(
+        id=row["id"],
+        timestamp=row["timestamp"],
+        status=row["status"] if "status" in row.keys() else "completed",
+        total_findings=row["total_findings"],
+        security_findings=row["security_findings"],
+        quality_findings=row["quality_findings"],
+        health_score=row["health_score"],
+        health_grade=row["health_grade"],
+        execution_time_ms=row["execution_time_ms"],
+        code_preview=row["code_preview"],
+    )
 
 
 def get_dashboard_metrics() -> DashboardMetrics:

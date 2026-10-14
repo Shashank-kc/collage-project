@@ -26,7 +26,7 @@ import logging
 from pathlib import Path
 import tempfile
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from app.schemas.analysis import (
     AnalysisSummary,
@@ -35,6 +35,9 @@ from app.schemas.analysis import (
     FindingCategory,
     FindingSeverity,
     ScannerTelemetry,
+    ScanComparisonResponse,
+    VerificationStatus,
+    VerifyFixResponse,
 )
 from app.services.bandit_analyzer import BanditAnalyzer
 from app.services.ruff_analyzer import RuffAnalyzer
@@ -75,9 +78,14 @@ class AnalysisCoordinator:
         findings: List[Finding] = []
         scanners_telemetry: List[ScannerTelemetry] = []
 
+        # Sanitize filename to prevent directory traversal
+        safe_filename = Path(filename).name if filename else "submission.py"
+        if not safe_filename or safe_filename in (".", ".."):
+            safe_filename = "submission.py"
+
         # Create an isolated temporary directory for safe file inspection
         with tempfile.TemporaryDirectory(prefix="codeguard_") as temp_dir:
-            temp_file = Path(temp_dir) / "submission.py"
+            temp_file = Path(temp_dir) / safe_filename
             temp_file.write_text(source_code, encoding="utf-8")
 
             # 1. Execute Ruff Analyzer (Quality, Syntax, Formatting)
@@ -223,3 +231,120 @@ class AnalysisCoordinator:
             grade = "F"
 
         return score, grade
+
+    def verify_fix(
+        self,
+        original_rule_id: str,
+        updated_code: str,
+        original_line: Optional[int] = None,
+        prior_score: int = 100,
+        prior_finding_count: int = 1,
+        enable_ruff: bool = True,
+        enable_bandit: bool = True
+    ) -> VerifyFixResponse:
+        """
+        Differentiating Feature: Fix Verification Engine (Explain. Fix. Verify.)
+        Re-scans the modified code and evaluates verification status:
+        - RESOLVED: Target rule is no longer detected.
+        - STILL_DETECTED: Target rule remains present.
+        - INCONCLUSIVE: Scanner execution failed or timed out.
+        - NEW_FINDING: Target rule resolved, but other defects were introduced.
+        """
+        analysis = self.run_analysis(
+            source_code=updated_code,
+            filename="verified_submission.py",
+            enable_ruff=enable_ruff,
+            enable_bandit=enable_bandit
+        )
+
+        has_failed = any(
+            s.status in ("failed", "timed_out")
+            for s in analysis.scanners
+            if s.status != "disabled"
+        )
+        if has_failed:
+            return VerifyFixResponse(
+                status=VerificationStatus.INCONCLUSIVE,
+                rule_id=original_rule_id,
+                message="Fix verification was inconclusive because one or more static analysis tools failed or timed out.",
+                health_score_delta=analysis.summary.health_score - prior_score,
+                prior_score=prior_score,
+                new_score=analysis.summary.health_score,
+                prior_finding_count=prior_finding_count,
+                new_finding_count=analysis.summary.total_findings,
+                subsequent_analysis=analysis
+            )
+
+        # Check if original rule is still present in subsequent scan
+        matching_findings = [
+            f for f in analysis.findings
+            if f.rule_id.upper() == original_rule_id.upper()
+        ]
+
+        score_delta = analysis.summary.health_score - prior_score
+        new_finding_count = analysis.summary.total_findings
+
+        if matching_findings:
+            return VerifyFixResponse(
+                status=VerificationStatus.STILL_DETECTED,
+                rule_id=original_rule_id,
+                message=f"Rule {original_rule_id} is still detected in the updated code ({len(matching_findings)} occurrence(s)). Review remediation guidance and adjust code.",
+                health_score_delta=score_delta,
+                prior_score=prior_score,
+                new_score=analysis.summary.health_score,
+                prior_finding_count=prior_finding_count,
+                new_finding_count=new_finding_count,
+                subsequent_analysis=analysis
+            )
+
+        if new_finding_count > 0 and prior_finding_count == 1:
+            return VerifyFixResponse(
+                status=VerificationStatus.NEW_FINDING,
+                rule_id=original_rule_id,
+                message=f"Original finding {original_rule_id} was resolved, but subsequent analysis detected {new_finding_count} other issue(s).",
+                health_score_delta=score_delta,
+                prior_score=prior_score,
+                new_score=analysis.summary.health_score,
+                prior_finding_count=prior_finding_count,
+                new_finding_count=new_finding_count,
+                subsequent_analysis=analysis
+            )
+
+        return VerifyFixResponse(
+            status=VerificationStatus.RESOLVED,
+            rule_id=original_rule_id,
+            message=f"Rule {original_rule_id} successfully verified as resolved! Code health improved by {score_delta:+d} points.",
+            health_score_delta=score_delta,
+            prior_score=prior_score,
+            new_score=analysis.summary.health_score,
+            prior_finding_count=prior_finding_count,
+            new_finding_count=new_finding_count,
+            subsequent_analysis=analysis
+        )
+
+    def compare_scan_findings(
+        self,
+        base_findings: List[Finding],
+        subsequent_findings: List[Finding],
+        base_score: int,
+        subsequent_score: int,
+        base_scan_id: Optional[int] = None,
+        subsequent_scan_id: Optional[int] = None
+    ) -> ScanComparisonResponse:
+        """Compares two sets of findings to compute resolved, remaining, and new findings."""
+        base_rules = {f.rule_id.upper() for f in base_findings}
+        subsequent_rules = {f.rule_id.upper() for f in subsequent_findings}
+
+        resolved_count = len(base_rules - subsequent_rules)
+        remaining_count = len(base_rules & subsequent_rules)
+        new_count = len(subsequent_rules - base_rules)
+        score_delta = subsequent_score - base_score
+
+        return ScanComparisonResponse(
+            base_scan_id=base_scan_id,
+            subsequent_scan_id=subsequent_scan_id,
+            resolved_count=resolved_count,
+            remaining_count=remaining_count,
+            new_count=new_count,
+            score_delta=score_delta
+        )
