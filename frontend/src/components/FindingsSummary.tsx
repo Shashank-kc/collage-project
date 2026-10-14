@@ -1,6 +1,6 @@
 import React from 'react';
 import type { AnalysisSummary } from '../types';
-import { Shield, Sparkles, Clock } from 'lucide-react';
+import { Shield, Sparkles, Clock, HelpCircle } from 'lucide-react';
 
 interface FindingsSummaryProps {
   summary: AnalysisSummary;
@@ -12,14 +12,22 @@ export const FindingsSummary: React.FC<FindingsSummaryProps> = ({ summary, execu
     <div className="metrics-row">
       {/* Code Health Grade & Score */}
       <div className="metric-card">
-        <span className="metric-title">Health Score</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span className="metric-title">Health Score</span>
+          <span
+            title="Deductions: Critical -25pts, High -15pts, Medium -8pts, Low -3pts, Info -1pt. Base: 100."
+            style={{ cursor: 'help', color: 'var(--text-dim)' }}
+          >
+            <HelpCircle size={12} />
+          </span>
+        </div>
         <div className="metric-value-group">
           <div className={`grade-badge grade-${summary.health_grade}`}>
             {summary.health_grade}
           </div>
           <div>
             <div className="metric-number">{summary.health_score}</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>out of 100</div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>out of 100</div>
           </div>
         </div>
       </div>
@@ -28,13 +36,22 @@ export const FindingsSummary: React.FC<FindingsSummaryProps> = ({ summary, execu
       <div className="metric-card">
         <span className="metric-title">Security Risks</span>
         <div className="metric-value-group">
-          <div className="metric-number" style={{ color: summary.security_findings > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}>
+          <div
+            className="metric-number"
+            style={{ color: summary.security_findings > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}
+          >
             {summary.security_findings}
           </div>
-          <Shield size={18} style={{ color: summary.security_findings > 0 ? 'var(--color-danger)' : 'var(--color-success)', marginLeft: 'auto' }} />
+          <Shield
+            size={18}
+            style={{
+              color: summary.security_findings > 0 ? 'var(--color-danger)' : 'var(--color-success)',
+              marginLeft: 'auto',
+            }}
+          />
         </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
-          {summary.critical_count + summary.high_count} high / critical
+        <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+          {summary.critical_count + summary.high_count} critical/high
         </div>
       </div>
 
@@ -42,13 +59,16 @@ export const FindingsSummary: React.FC<FindingsSummaryProps> = ({ summary, execu
       <div className="metric-card">
         <span className="metric-title">Quality & Style</span>
         <div className="metric-value-group">
-          <div className="metric-number" style={{ color: summary.quality_findings > 0 ? 'var(--color-warning)' : 'var(--color-success)' }}>
+          <div
+            className="metric-number"
+            style={{ color: summary.quality_findings > 0 ? 'var(--color-warning)' : 'var(--color-success)' }}
+          >
             {summary.quality_findings}
           </div>
-          <Sparkles size={18} style={{ color: 'var(--color-primary)', marginLeft: 'auto' }} />
+          <Sparkles size={18} style={{ color: 'var(--color-violet)', marginLeft: 'auto' }} />
         </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
-          AST linting & PEP 8
+        <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+          Ruff AST & PEP 8
         </div>
       </div>
 
@@ -59,13 +79,22 @@ export const FindingsSummary: React.FC<FindingsSummaryProps> = ({ summary, execu
           <div className="metric-number">
             {summary.total_findings}
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-            <Clock size={13} />
+          <div
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '0.74rem',
+              color: 'var(--text-dim)',
+            }}
+          >
+            <Clock size={12} />
             <span>{executionTimeMs}ms</span>
           </div>
         </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
-          Bandit + Ruff scan
+        <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+          Pipeline execution
         </div>
       </div>
     </div>

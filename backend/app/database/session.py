@@ -2,18 +2,17 @@
 CodeGuard AI - SQLite Database Manager
 ======================================
 Stores past scan runs locally using Python's built-in sqlite3.
-No heavy database server required—ideal for development and learning.
+Provides aggregated analytics for the developer dashboard.
 """
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import logging
-from pathlib import Path
 import sqlite3
 from typing import Generator, List
 
 from app.config import DATABASE_PATH
-from app.schemas.analysis import ScanHistoryItem
+from app.schemas.analysis import DashboardMetrics, ScanHistoryItem
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +33,14 @@ def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
 
 
 def init_db() -> None:
-    """Initializes database tables if they do not exist."""
+    """Initializes database schema and runs non-destructive migrations."""
     with get_db_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 filename TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'completed',
                 lines_analyzed INTEGER NOT NULL,
                 health_score INTEGER NOT NULL,
                 health_grade TEXT NOT NULL,
@@ -52,6 +52,16 @@ def init_db() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_timestamp ON scans(timestamp DESC)")
+
+        # Gracefully add 'status' column if migrating from an earlier table version
+        try:
+            cursor = conn.execute("PRAGMA table_info(scans)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "status" not in columns:
+                conn.execute("ALTER TABLE scans ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'")
+        except Exception as exc:
+            logger.debug("Table migration note: %s", exc)
+
     logger.info("SQLite database initialized at: %s", DATABASE_PATH)
 
 
@@ -64,7 +74,8 @@ def save_scan_record(
     security_findings: int,
     quality_findings: int,
     execution_time_ms: float,
-    source_code: str
+    source_code: str,
+    status: str = "completed"
 ) -> int:
     """Saves a scan record and returns the new record ID."""
     # Preview up to 300 characters
@@ -74,13 +85,14 @@ def save_scan_record(
     with get_db_connection() as conn:
         cursor = conn.execute("""
             INSERT INTO scans (
-                timestamp, filename, lines_analyzed, health_score, health_grade,
+                timestamp, filename, status, lines_analyzed, health_score, health_grade,
                 total_findings, security_findings, quality_findings,
                 execution_time_ms, code_preview
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             now_iso,
             filename,
+            status,
             lines_analyzed,
             health_score,
             health_grade,
@@ -97,7 +109,7 @@ def get_recent_scans(limit: int = 10) -> List[ScanHistoryItem]:
     """Retrieves recent scan records ordered by most recent first."""
     with get_db_connection() as conn:
         rows = conn.execute("""
-            SELECT id, timestamp, total_findings, security_findings,
+            SELECT id, timestamp, status, total_findings, security_findings,
                    quality_findings, health_score, health_grade,
                    execution_time_ms, code_preview
             FROM scans
@@ -111,6 +123,7 @@ def get_recent_scans(limit: int = 10) -> List[ScanHistoryItem]:
             ScanHistoryItem(
                 id=row["id"],
                 timestamp=row["timestamp"],
+                status=row["status"] if "status" in row.keys() else "completed",
                 total_findings=row["total_findings"],
                 security_findings=row["security_findings"],
                 quality_findings=row["quality_findings"],
@@ -121,3 +134,52 @@ def get_recent_scans(limit: int = 10) -> List[ScanHistoryItem]:
             )
         )
     return items
+
+
+def get_dashboard_metrics() -> DashboardMetrics:
+    """Aggregates real scan history from SQLite for the developer dashboard."""
+    with get_db_connection() as conn:
+        # Total counts
+        total_scans = conn.execute("SELECT COUNT(*) as count FROM scans").fetchone()["count"]
+        completed_scans = conn.execute("SELECT COUNT(*) as count FROM scans WHERE status = 'completed'").fetchone()["count"]
+        failed_scans = conn.execute("SELECT COUNT(*) as count FROM scans WHERE status != 'completed'").fetchone()["count"]
+
+        # Average score & issue totals
+        aggregates = conn.execute("""
+            SELECT 
+                AVG(health_score) as avg_score,
+                SUM(security_findings) as sum_security,
+                SUM(quality_findings) as sum_quality
+            FROM scans
+            WHERE status = 'completed'
+        """).fetchone()
+
+        avg_score = round(aggregates["avg_score"] or 100.0, 1) if aggregates else 100.0
+        sum_security = aggregates["sum_security"] or 0 if aggregates else 0
+        sum_quality = aggregates["sum_quality"] or 0 if aggregates else 0
+
+        # Grade distribution
+        grade_rows = conn.execute("""
+            SELECT health_grade, COUNT(*) as count
+            FROM scans
+            WHERE status = 'completed'
+            GROUP BY health_grade
+        """).fetchall()
+
+        grades = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
+        for r in grade_rows:
+            if r["health_grade"] in grades:
+                grades[r["health_grade"]] = r["count"]
+
+    recent = get_recent_scans(limit=5)
+
+    return DashboardMetrics(
+        total_scans=total_scans,
+        completed_scans=completed_scans,
+        failed_scans=failed_scans,
+        average_health_score=avg_score,
+        total_security_issues=sum_security,
+        total_quality_issues=sum_quality,
+        grade_distribution=grades,
+        recent_scans=recent
+    )

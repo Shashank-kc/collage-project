@@ -12,26 +12,28 @@ inspection is performed.
 import json
 import logging
 import subprocess
+import time
 import uuid
-from typing import List
+from typing import List, Tuple
 
 from app.config import ANALYSIS_TIMEOUT_SECONDS, BANDIT_PATH
-from app.schemas.analysis import Finding, FindingCategory, FindingSeverity
-from app.services.recommendations import get_docs_for_rule, get_recommendation_for_rule
+from app.schemas.analysis import Finding, FindingCategory, FindingSeverity, ScannerTelemetry
+from app.services.recommendations import get_rule_details
 
 logger = logging.getLogger(__name__)
 
 
 class BanditAnalyzer:
-    """Invokes Bandit CLI and transforms security scan results into normalized Findings."""
+    """Invokes Bandit CLI and transforms security scan results into normalized Findings with telemetry."""
 
     def __init__(self, executable_path: str = BANDIT_PATH):
         self.executable_path = executable_path
 
-    def analyze(self, file_path: str, source_code: str) -> List[Finding]:
+    def analyze(self, file_path: str, source_code: str) -> Tuple[List[Finding], ScannerTelemetry]:
         """
-        Runs `bandit -f json -q <file_path>` and returns normalized findings.
+        Runs `bandit -f json -q <file_path>` and returns (findings, telemetry).
         """
+        start = time.perf_counter()
         findings: List[Finding] = []
         code_lines = source_code.splitlines()
 
@@ -39,29 +41,41 @@ class BanditAnalyzer:
             self.executable_path,
             "-f",
             "json",
-            "-q",  # Quiet mode: suppress banners, output pure json
+            "-q",
             file_path
         ]
 
         try:
-            # Execute Bandit in an isolated subprocess with a strict timeout
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
                 timeout=ANALYSIS_TIMEOUT_SECONDS,
-                check=False  # Bandit exits with 1 if issues found
+                check=False
             )
 
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
             stdout = result.stdout.strip()
+
             if not stdout:
-                return findings
+                return findings, ScannerTelemetry(
+                    name="bandit",
+                    status="completed",
+                    duration_ms=duration_ms,
+                    findings_count=0
+                )
 
             try:
                 data = json.loads(stdout)
             except json.JSONDecodeError as exc:
-                logger.error("Failed to decode Bandit JSON output: %s. Output was: %s", exc, stdout)
-                return findings
+                logger.error("Failed to decode Bandit JSON output: %s", exc)
+                return findings, ScannerTelemetry(
+                    name="bandit",
+                    status="failed",
+                    duration_ms=duration_ms,
+                    findings_count=0,
+                    error_message=f"Invalid JSON emitted by Bandit: {exc}"
+                )
 
             raw_results = data.get("results", [])
             for item in raw_results:
@@ -71,17 +85,16 @@ class BanditAnalyzer:
                 raw_confidence = item.get("issue_confidence", "MEDIUM").upper()
                 line_no = item.get("line_number")
 
-                # Extract line snippet
                 snippet = None
                 if line_no is not None and 1 <= line_no <= len(code_lines):
                     snippet = code_lines[line_no - 1].strip()
                 elif item.get("code"):
                     snippet = item.get("code").strip()
 
-                # Map Bandit severity & confidence to standard severity
                 severity = self._map_severity(raw_severity, raw_confidence)
-                recommendation = get_recommendation_for_rule(rule_id, message)
-                doc_url = item.get("more_info") or get_docs_for_rule(rule_id)
+                why_it_matters, recommendation, doc_url = get_rule_details(rule_id, message)
+                if item.get("more_info"):
+                    doc_url = item.get("more_info")
 
                 findings.append(
                     Finding(
@@ -94,12 +107,21 @@ class BanditAnalyzer:
                         line=line_no,
                         column=None,
                         code_snippet=snippet,
+                        why_it_matters=why_it_matters,
                         recommendation=recommendation,
                         documentation_url=doc_url,
                     )
                 )
 
+            return findings, ScannerTelemetry(
+                name="bandit",
+                status="completed",
+                duration_ms=duration_ms,
+                findings_count=len(findings)
+            )
+
         except subprocess.TimeoutExpired:
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
             logger.warning("Bandit analysis timed out after %s seconds", ANALYSIS_TIMEOUT_SECONDS)
             findings.append(
                 Finding(
@@ -109,19 +131,29 @@ class BanditAnalyzer:
                     rule_id="TIMEOUT",
                     message="Bandit security analysis timed out.",
                     severity=FindingSeverity.LOW,
+                    why_it_matters="Execution limits protect server resources from hanging on pathological input.",
                     recommendation="Ensure code does not contain deeply recursive structures."
                 )
             )
+            return findings, ScannerTelemetry(
+                name="bandit",
+                status="timed_out",
+                duration_ms=duration_ms,
+                findings_count=1,
+                error_message=f"Process timed out after {ANALYSIS_TIMEOUT_SECONDS}s"
+            )
         except Exception as exc:
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
             logger.exception("Unexpected error while running Bandit: %s", exc)
-
-        return findings
+            return findings, ScannerTelemetry(
+                name="bandit",
+                status="failed",
+                duration_ms=duration_ms,
+                findings_count=0,
+                error_message=str(exc)
+            )
 
     def _map_severity(self, raw_severity: str, raw_confidence: str) -> FindingSeverity:
-        """
-        Combines severity and confidence to determine overall risk level.
-        High severity with High confidence -> CRITICAL.
-        """
         if raw_severity == "HIGH":
             if raw_confidence == "HIGH":
                 return FindingSeverity.CRITICAL

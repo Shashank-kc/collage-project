@@ -5,7 +5,10 @@ from app.schemas.analysis import (
     FindingCategory,
     FindingSeverity,
     AnalysisSummary,
+    ScannerTelemetry,
     ScanHistoryItem,
+    DashboardMetrics,
+    SettingsInfo,
 )
 
 __all__ = [
@@ -15,5 +18,8 @@ __all__ = [
     "FindingCategory",
     "FindingSeverity",
     "AnalysisSummary",
+    "ScannerTelemetry",
     "ScanHistoryItem",
+    "DashboardMetrics",
+    "SettingsInfo",
 ]

@@ -1,21 +1,35 @@
 """
 CodeGuard AI - API Endpoints
 =============================
-Defines the REST API routes for code analysis, scan history, health checks,
-and educational code samples.
+Defines the REST API routes for code analysis, scan history, metrics,
+settings, health checks, and educational sample snippets.
 """
 
+from pathlib import Path
 from typing import List
 from fastapi import APIRouter, HTTPException, status
 
-from app.config import MAX_CODE_SIZE_BYTES, RUFF_PATH, BANDIT_PATH
-from app.database.session import get_recent_scans, save_scan_record
+from app.config import (
+    ANALYSIS_TIMEOUT_SECONDS,
+    BANDIT_PATH,
+    CORS_ORIGINS,
+    MAX_CODE_SIZE_BYTES,
+    RATE_LIMIT_REQUESTS,
+    RATE_LIMIT_WINDOW_SECONDS,
+    RUFF_PATH,
+)
+from app.database.session import get_dashboard_metrics, get_recent_scans, save_scan_record
 from app.schemas.analysis import (
     CodeAnalysisRequest,
     CodeAnalysisResponse,
+    DashboardMetrics,
+    FindingExplanationRequest,
+    FindingExplanationResponse,
     ScanHistoryItem,
+    SettingsInfo,
 )
 from app.services.coordinator import AnalysisCoordinator
+from app.services.ai_explainer import ai_explainer
 
 router = APIRouter(prefix="/api/v1", tags=["Analysis"])
 coordinator = AnalysisCoordinator()
@@ -113,8 +127,17 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
             detail=f"Code size ({code_bytes} bytes) exceeds maximum limit of {MAX_CODE_SIZE_BYTES} bytes (100 KB)."
         )
 
-    # Execute static analysis pipeline
-    response = coordinator.run_analysis(raw_code, payload.filename or "submission.py")
+    # Execute static analysis pipeline with tool selections
+    response = coordinator.run_analysis(
+        source_code=raw_code,
+        filename=payload.filename or "submission.py",
+        enable_ruff=payload.enable_ruff,
+        enable_bandit=payload.enable_bandit
+    )
+
+    # Check overall scanner status
+    has_failed_scanner = any(s.status == "failed" for s in response.scanners)
+    scan_status = "failed" if has_failed_scanner else "completed"
 
     # Persist summary to SQLite database
     try:
@@ -127,18 +150,46 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
             security_findings=response.summary.security_findings,
             quality_findings=response.summary.quality_findings,
             execution_time_ms=response.execution_time_ms,
-            source_code=raw_code
+            source_code=raw_code,
+            status=scan_status
         )
         response.scan_id = scan_id
     except Exception as exc:
-        # DB failure should not prevent analysis results from returning
         print(f"Warning: Failed to save scan to database: {exc}")
 
     return response
 
 
+@router.get("/metrics", response_model=DashboardMetrics)
+async def get_metrics() -> DashboardMetrics:
+    """Retrieves real aggregated statistics from SQLite scan history."""
+    return get_dashboard_metrics()
+
+
+@router.get("/settings", response_model=SettingsInfo)
+async def get_settings() -> SettingsInfo:
+    """Returns genuine server configuration, scanner versions, and security limits."""
+    return SettingsInfo(
+        ruff_available=Path(RUFF_PATH).exists(),
+        bandit_available=Path(BANDIT_PATH).exists(),
+        ruff_path=RUFF_PATH,
+        bandit_path=BANDIT_PATH,
+        max_code_size_kb=MAX_CODE_SIZE_BYTES // 1024,
+        timeout_seconds=ANALYSIS_TIMEOUT_SECONDS,
+        rate_limit_requests=RATE_LIMIT_REQUESTS,
+        rate_limit_window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+        cors_origins=CORS_ORIGINS,
+        privacy_policy=(
+            "CodeGuard AI performs pure static AST analysis. "
+            "Submitted Python code is stored temporarily in isolated temporary files "
+            "during inspection and deleted immediately after analysis. "
+            "Only scan metadata and previews (up to 300 characters) are retained locally in SQLite."
+        )
+    )
+
+
 @router.get("/history", response_model=List[ScanHistoryItem])
-async def list_recent_scans(limit: int = 10) -> List[ScanHistoryItem]:
+async def list_recent_scans(limit: int = 15) -> List[ScanHistoryItem]:
     """Retrieves recent scan records from SQLite history."""
     clamped_limit = max(1, min(limit, 50))
     return get_recent_scans(clamped_limit)
@@ -150,10 +201,27 @@ async def get_sample_codes():
     return SAMPLE_CODES
 
 
+@router.post("/explain-finding", response_model=FindingExplanationResponse)
+async def explain_finding(payload: FindingExplanationRequest) -> FindingExplanationResponse:
+    """
+    Optional AI-assisted mentor explanation for a specific static analysis finding.
+    Strictly isolated and clearly identified as advisory.
+    """
+    explanation, is_ai = ai_explainer.explain(
+        rule_id=payload.rule_id,
+        message=payload.message,
+        code_snippet=payload.code_snippet
+    )
+    return FindingExplanationResponse(
+        rule_id=payload.rule_id,
+        explanation=explanation,
+        is_ai_generated=is_ai
+    )
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint confirming service status and tool availability."""
-    from pathlib import Path
     return {
         "status": "healthy",
         "service": "CodeGuard AI Backend",

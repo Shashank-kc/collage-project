@@ -16,12 +16,15 @@ def test_ruff_detects_unused_import():
         temp_file = Path(temp_dir) / "test.py"
         temp_file.write_text(sample_code, encoding="utf-8")
 
-        findings = analyzer.analyze(str(temp_file), sample_code)
+        findings, telemetry = analyzer.analyze(str(temp_file), sample_code)
 
     # Should detect unused imports (F401)
     rule_ids = [f.rule_id for f in findings]
     assert "F401" in rule_ids
     assert any(f.category == FindingCategory.QUALITY for f in findings)
+    assert telemetry.status == "completed"
+    assert telemetry.findings_count > 0
+    assert findings[0].why_it_matters is not None
 
 
 def test_ruff_clean_code():
@@ -32,7 +35,9 @@ def test_ruff_clean_code():
         temp_file = Path(temp_dir) / "test.py"
         temp_file.write_text(clean_code, encoding="utf-8")
 
-        findings = analyzer.analyze(str(temp_file), clean_code)
+        findings, telemetry = analyzer.analyze(str(temp_file), clean_code)
 
     # Should have no quality errors
     assert len(findings) == 0
+    assert telemetry.status == "completed"
+    assert telemetry.findings_count == 0

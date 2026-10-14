@@ -2,12 +2,11 @@
 CodeGuard AI - Data Schemas (Pydantic Models)
 =============================================
 Defines the request and response data structures used by FastAPI.
-Pydantic automatically validates types, handles serialization to JSON,
-and generates OpenAPI documentation.
+Includes educational explanations, telemetry per tool, and dashboard metrics.
 """
 
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -31,15 +30,33 @@ class Finding(BaseModel):
     tool: str = Field(description="Static analysis tool that reported the issue ('ruff' or 'bandit')")
     category: FindingCategory = Field(description="Category of the finding")
     rule_id: str = Field(description="Tool rule code (e.g., B608, F401, E501)")
-    message: str = Field(description="Human-readable explanation of the issue")
+    message: str = Field(description="Human-readable description of the issue")
     severity: FindingSeverity = Field(description="Severity rating")
     line: Optional[int] = Field(default=None, description="Line number where the issue was found (1-indexed)")
     column: Optional[int] = Field(default=None, description="Column number (1-indexed)")
     end_line: Optional[int] = Field(default=None, description="Ending line number if available")
     end_column: Optional[int] = Field(default=None, description="Ending column number if available")
     code_snippet: Optional[str] = Field(default=None, description="Code snippet where the issue occurred")
-    recommendation: Optional[str] = Field(default=None, description="Suggested remedy or best practice for Python developers")
-    documentation_url: Optional[str] = Field(default=None, description="Link to official rule documentation")
+    why_it_matters: Optional[str] = Field(
+        default=None,
+        description="Educational explanation detailing the security/architectural impact of this issue"
+    )
+    recommendation: Optional[str] = Field(
+        default=None,
+        description="Suggested remedy or concrete best practice for Python developers"
+    )
+    documentation_url: Optional[str] = Field(
+        default=None,
+        description="Link to official rule documentation"
+    )
+
+
+class ScannerTelemetry(BaseModel):
+    name: str = Field(description="Scanner name ('ruff' or 'bandit')")
+    status: str = Field(description="Execution status ('completed', 'failed', 'timed_out', 'disabled')")
+    duration_ms: float = Field(description="Time taken by this specific scanner in milliseconds")
+    findings_count: int = Field(description="Number of findings discovered by this scanner")
+    error_message: Optional[str] = Field(default=None, description="Error message if the scanner failed")
 
 
 class AnalysisSummary(BaseModel):
@@ -65,23 +82,36 @@ class CodeAnalysisRequest(BaseModel):
         default="submission.py",
         description="Optional display filename"
     )
+    enable_ruff: bool = Field(
+        default=True,
+        description="Whether to execute Ruff code quality scanner"
+    )
+    enable_bandit: bool = Field(
+        default=True,
+        description="Whether to execute Bandit security scanner"
+    )
 
 
 class CodeAnalysisResponse(BaseModel):
     scan_id: Optional[int] = Field(default=None, description="Unique ID saved in database history")
     timestamp: str = Field(description="ISO 8601 timestamp of analysis")
-    execution_time_ms: float = Field(description="Time taken by the analysis pipeline in milliseconds")
+    execution_time_ms: float = Field(description="Total time taken by the analysis pipeline in milliseconds")
     lines_analyzed: int = Field(description="Total lines of code analyzed")
+    scanners: List[ScannerTelemetry] = Field(
+        default_factory=list,
+        description="Telemetry and status for each configured scanner"
+    )
     summary: AnalysisSummary = Field(description="High-level metrics and health grade")
     findings: List[Finding] = Field(default_factory=list, description="Detailed list of findings")
     disclaimer: str = Field(
-        default="Static analysis checks code patterns without executing code. It is an automated aid and does not guarantee that code is free of all defects or security vulnerabilities."
+        default="Static analysis inspects code structure without execution. While it identifies common vulnerabilities and code defects, it does not guarantee 100% bug-free or secure software."
     )
 
 
 class ScanHistoryItem(BaseModel):
     id: int
     timestamp: str
+    status: str = "completed"
     total_findings: int
     security_findings: int
     quality_findings: int
@@ -89,3 +119,43 @@ class ScanHistoryItem(BaseModel):
     health_grade: str
     execution_time_ms: float
     code_preview: str
+
+
+class DashboardMetrics(BaseModel):
+    total_scans: int
+    completed_scans: int
+    failed_scans: int
+    average_health_score: float
+    total_security_issues: int
+    total_quality_issues: int
+    grade_distribution: Dict[str, int]
+    recent_scans: List[ScanHistoryItem]
+
+
+class SettingsInfo(BaseModel):
+    ruff_available: bool
+    bandit_available: bool
+    ruff_path: str
+    bandit_path: str
+    max_code_size_kb: int
+    timeout_seconds: int
+    rate_limit_requests: int
+    rate_limit_window_seconds: int
+    cors_origins: List[str]
+    privacy_policy: str
+
+
+class FindingExplanationRequest(BaseModel):
+    rule_id: str
+    message: str
+    code_snippet: Optional[str] = None
+
+
+class FindingExplanationResponse(BaseModel):
+    rule_id: str
+    explanation: str
+    is_ai_generated: bool
+    disclaimer: str = (
+        "AI-generated recommendations are advisory and must be reviewed by an engineer prior to implementation."
+    )
+
