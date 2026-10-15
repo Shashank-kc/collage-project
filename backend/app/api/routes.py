@@ -6,8 +6,8 @@ settings, health checks, and educational sample snippets.
 """
 
 from pathlib import Path
-from typing import List
-from fastapi import APIRouter, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import (
     ANALYSIS_TIMEOUT_SECONDS,
@@ -37,6 +37,8 @@ from app.schemas.analysis import (
     VerifyFixRequest,
     VerifyFixResponse,
 )
+from app.schemas.auth import UserResponse
+from app.services.auth_service import get_optional_user
 from app.services.coordinator import AnalysisCoordinator
 from app.services.ai_explainer import ai_explainer
 
@@ -114,10 +116,14 @@ SAMPLE_CODES = {
 
 
 @router.post("/analyze", response_model=CodeAnalysisResponse)
-async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
+async def analyze_code(
+    payload: CodeAnalysisRequest,
+    current_user: Optional[UserResponse] = Depends(get_optional_user)
+) -> CodeAnalysisResponse:
     """
     Submits Python source code for static analysis with Ruff and Bandit.
     Code is inspected strictly using static AST parsers and NEVER executed.
+    Associates scan records with the authenticated user for data isolation.
     """
     raw_code = payload.code
 
@@ -153,8 +159,9 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
     has_failed_scanner = any(s.status == "failed" for s in response.scanners)
     scan_status = "failed" if has_failed_scanner else "completed"
 
-    # Persist summary to SQLite database
+    # Persist summary to SQLite database, associating with user if authenticated
     try:
+        user_id = current_user.id if current_user else None
         scan_id = save_scan_record(
             filename=safe_filename,
             lines_analyzed=response.lines_analyzed,
@@ -165,7 +172,8 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
             quality_findings=response.summary.quality_findings,
             execution_time_ms=response.execution_time_ms,
             source_code=raw_code,
-            status=scan_status
+            status=scan_status,
+            user_id=user_id
         )
         response.scan_id = scan_id
     except Exception as exc:
@@ -175,9 +183,12 @@ async def analyze_code(payload: CodeAnalysisRequest) -> CodeAnalysisResponse:
 
 
 @router.get("/metrics", response_model=DashboardMetrics)
-async def get_metrics() -> DashboardMetrics:
-    """Retrieves real aggregated statistics from SQLite scan history."""
-    return get_dashboard_metrics()
+async def get_metrics(
+    current_user: Optional[UserResponse] = Depends(get_optional_user)
+) -> DashboardMetrics:
+    """Retrieves aggregated statistics from SQLite scan history isolated to the current user."""
+    user_id = current_user.id if current_user else None
+    return get_dashboard_metrics(user_id=user_id)
 
 
 @router.get("/settings", response_model=SettingsInfo)
@@ -203,10 +214,14 @@ async def get_settings() -> SettingsInfo:
 
 
 @router.get("/history", response_model=List[ScanHistoryItem])
-async def list_recent_scans(limit: int = 15) -> List[ScanHistoryItem]:
-    """Retrieves recent scan records from SQLite history."""
+async def list_recent_scans(
+    limit: int = 15,
+    current_user: Optional[UserResponse] = Depends(get_optional_user)
+) -> List[ScanHistoryItem]:
+    """Retrieves recent scan records from SQLite history isolated to the current user."""
     clamped_limit = max(1, min(limit, 50))
-    return get_recent_scans(clamped_limit)
+    user_id = current_user.id if current_user else None
+    return get_recent_scans(limit=clamped_limit, user_id=user_id)
 
 
 @router.get("/samples")
@@ -247,9 +262,13 @@ async def verify_fix_endpoint(payload: VerifyFixRequest) -> VerifyFixResponse:
 
 
 @router.post("/compare-scans", response_model=ScanComparisonResponse)
-async def compare_scans_endpoint(payload: ScanComparisonRequest) -> ScanComparisonResponse:
+async def compare_scans_endpoint(
+    payload: ScanComparisonRequest,
+    current_user: Optional[UserResponse] = Depends(get_optional_user)
+) -> ScanComparisonResponse:
     """
     Compares two historical scans by their SQLite IDs to calculate resolved and remaining findings.
+    Enforces authorization check: cannot compare scans belonging to another user.
     """
     if payload.base_scan_id is None or payload.subsequent_scan_id is None:
         raise HTTPException(
@@ -257,13 +276,14 @@ async def compare_scans_endpoint(payload: ScanComparisonRequest) -> ScanComparis
             detail="Both base_scan_id and subsequent_scan_id must be provided."
         )
 
-    base = get_scan_by_id(payload.base_scan_id)
-    subsequent = get_scan_by_id(payload.subsequent_scan_id)
+    user_id = current_user.id if current_user else None
+    base = get_scan_by_id(payload.base_scan_id, user_id=user_id)
+    subsequent = get_scan_by_id(payload.subsequent_scan_id, user_id=user_id)
 
     if not base or not subsequent:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="One or both of the specified scans could not be found in history."
+            detail="One or both of the specified scans could not be found or access is unauthorized."
         )
 
     score_delta = subsequent.health_score - base.health_score

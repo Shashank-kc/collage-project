@@ -28,6 +28,22 @@ ANALYSIS_TIMEOUT_SECONDS = 15
 RATE_LIMIT_REQUESTS = int(os.getenv("CODEGUARD_RATE_LIMIT_REQUESTS", "30"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("CODEGUARD_RATE_LIMIT_WINDOW_SECONDS", "60"))
 
+# Auth & Session Configuration
+SESSION_COOKIE_NAME = "codeguard_session"
+SESSION_EXPIRE_DAYS = int(os.getenv("CODEGUARD_SESSION_EXPIRE_DAYS", "7"))
+SESSION_COOKIE_SECURE = os.getenv("CODEGUARD_SESSION_SECURE", "false").lower() == "true"
+AUTH_RATE_LIMIT_REQUESTS = int(os.getenv("CODEGUARD_AUTH_RATE_LIMIT", "10"))
+AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
+
+# OpenAI Assistant Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+AI_RATE_LIMIT_REQUESTS = int(os.getenv("CODEGUARD_AI_RATE_LIMIT", "10"))
+AI_RATE_LIMIT_WINDOW_SECONDS = 60
+AI_MAX_PROMPT_CHARS = 10000
+AI_MAX_RESPONSE_TOKENS = 1500
+AI_TIMEOUT_SECONDS = 30
+
 # Allowed CORS origins for frontend-backend communication
 # In production, specify exact origins via CODEGUARD_CORS_ORIGINS (comma-separated).
 # Wildcards are strictly avoided by default.

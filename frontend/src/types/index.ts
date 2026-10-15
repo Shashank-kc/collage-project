@@ -148,3 +148,56 @@ export interface FindingExplanationResponse {
   is_ai_generated: boolean;
   disclaimer: string;
 }
+
+export interface User {
+  id: number;
+  email: string;
+  full_name: string;
+  created_at: string;
+}
+
+export interface AuthSuccessResponse {
+  user: User;
+  message: string;
+  token: string;
+}
+
+export interface FindingContext {
+  rule_id: string;
+  tool: string;
+  severity: FindingSeverity;
+  message: string;
+  line?: number | null;
+  code_snippet?: string | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversation_id: string;
+  sender: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+  finding_context?: FindingContext | null;
+  is_ai?: boolean;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationDetail {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ChatMessage[];
+}
+
+export interface AIStatus {
+  available: boolean;
+  model: string;
+  message: string;
+}

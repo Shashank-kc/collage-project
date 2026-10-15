@@ -14,7 +14,6 @@ import {
   ArrowRight,
   ShieldCheck,
 } from 'lucide-react';
-import { explainFinding } from '../services/api';
 
 interface FixVerificationPanelProps {
   finding: Finding | null;
@@ -24,6 +23,7 @@ interface FixVerificationPanelProps {
   isVerifying: boolean;
   lastVerificationResult: VerifyFixResponse | null;
   onClearVerificationResult: () => void;
+  onAskAIAboutFinding?: (finding: Finding) => void;
 }
 
 export const FixVerificationPanel: React.FC<FixVerificationPanelProps> = ({
@@ -34,11 +34,10 @@ export const FixVerificationPanel: React.FC<FixVerificationPanelProps> = ({
   isVerifying,
   lastVerificationResult,
   onClearVerificationResult,
+  onAskAIAboutFinding,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [appliedNotice, setAppliedNotice] = useState<boolean>(false);
-  const [aiExplanation, setAiExplanation] = useState<string | null>(null);
-  const [loadingAi, setLoadingAi] = useState<boolean>(false);
 
   if (!finding) {
     return (
@@ -64,22 +63,6 @@ export const FixVerificationPanel: React.FC<FixVerificationPanelProps> = ({
     onApplyFixSnippet(snippet);
     setAppliedNotice(true);
     setTimeout(() => setAppliedNotice(false), 3000);
-  };
-
-  const handleFetchAi = async () => {
-    setLoadingAi(true);
-    try {
-      const response = await explainFinding(
-        finding.rule_id,
-        finding.message,
-        finding.code_snippet
-      );
-      setAiExplanation(response.explanation);
-    } catch {
-      setAiExplanation('Unable to contact advisory AI service. Deterministic rule knowledge base remains active.');
-    } finally {
-      setLoadingAi(false);
-    }
   };
 
   const isCurrentResult = lastVerificationResult?.rule_id.toUpperCase() === finding.rule_id.toUpperCase();
@@ -280,35 +263,30 @@ export const FixVerificationPanel: React.FC<FixVerificationPanelProps> = ({
           </button>
         </div>
 
-        {/* Optional Advisory AI Mentor */}
+        {/* Dedicated AI Assistant Action */}
         <div className="explain-section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', fontWeight: 600 }}>
-              <Bot size={14} style={{ color: 'var(--color-violet)' }} />
-              <span>Advisory AI Explanation</span>
-              <span className="advisory-badge">OPTIONAL</span>
+              <Bot size={15} style={{ color: 'var(--color-amber)' }} />
+              <span>AI Security Mentor</span>
+              <span className="advisory-badge" style={{ backgroundColor: 'var(--color-amber-dim)', color: 'var(--color-amber)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>OPENAI</span>
             </div>
-
-            {!aiExplanation && (
-              <button
-                type="button"
-                className="btn-ghost-sm"
-                onClick={handleFetchAi}
-                disabled={loadingAi}
-              >
-                {loadingAi ? 'Consulting...' : 'Ask AI Tutor'}
-              </button>
-            )}
           </div>
 
-          {aiExplanation && (
-            <div className="ai-explanation-box">
-              <p style={{ fontSize: '0.78rem', lineHeight: 1.5 }}>{aiExplanation}</p>
-              <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '6px' }}>
-                * AI advice is purely advisory. Verified deterministic scanner findings govern code quality.
-              </div>
-            </div>
-          )}
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: '8px 0 10px 0' }}>
+            Open this finding in the dedicated AI Assistant to explore root cause analysis, security implications, and remediation guidance.
+          </p>
+
+          <button
+            type="button"
+            className="btn-ask-ai-finding"
+            onClick={() => onAskAIAboutFinding?.(finding)}
+            title="Ask AI Assistant about this finding"
+          >
+            <Bot size={14} style={{ color: 'var(--color-amber)' }} />
+            <span>Ask AI Assistant About This Finding</span>
+            <ArrowRight size={14} />
+          </button>
         </div>
 
         {/* Official Documentation Link */}

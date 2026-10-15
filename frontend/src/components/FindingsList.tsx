@@ -11,6 +11,7 @@ import {
   ArrowUpDown,
   Wrench,
   ChevronRight,
+  Bot,
 } from 'lucide-react';
 
 interface FindingsListProps {
@@ -20,6 +21,7 @@ interface FindingsListProps {
   selectedLine?: number | null;
   onSelectFinding?: (finding: Finding) => void;
   selectedFindingId?: string | null;
+  onAskAIAboutFinding?: (finding: Finding) => void;
 }
 
 type FilterCategory = 'all' | 'security' | 'quality' | 'high_critical' | 'ruff' | 'bandit';
@@ -40,6 +42,7 @@ export const FindingsList: React.FC<FindingsListProps> = ({
   selectedLine,
   onSelectFinding,
   selectedFindingId,
+  onAskAIAboutFinding,
 }) => {
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -337,19 +340,37 @@ export const FindingsList: React.FC<FindingsListProps> = ({
                     {finding.safer_example ? 'Fix template available' : 'Advisory guidance'}
                   </div>
 
-                  <button
-                    type="button"
-                    className="btn-inspect-fix"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectFinding?.(finding);
-                    }}
-                    title="Inspect root cause and verify remediation fix"
-                  >
-                    <Wrench size={12} />
-                    <span>Explain · Fix · Verify</span>
-                    <ChevronRight size={13} />
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {onAskAIAboutFinding && (
+                      <button
+                        type="button"
+                        className="btn-ghost-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAskAIAboutFinding(finding);
+                        }}
+                        title="Ask AI Assistant about this finding"
+                        style={{ fontSize: '0.72rem', padding: '4px 8px' }}
+                      >
+                        <Bot size={12} style={{ color: 'var(--color-amber)' }} />
+                        <span>Ask AI</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn-inspect-fix"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectFinding?.(finding);
+                      }}
+                      title="Inspect root cause and verify remediation fix"
+                    >
+                      <Wrench size={12} />
+                      <span>Explain · Fix · Verify</span>
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );

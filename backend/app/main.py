@@ -12,6 +12,8 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.auth_routes import router as auth_router
+from app.api.assistant_routes import router as assistant_router
 from app.api.routes import router as api_router
 from app.config import CORS_ORIGINS
 from app.database.session import init_db
@@ -31,7 +33,7 @@ async def lifespan(app: FastAPI):
     FastAPI lifespan context manager.
     Runs schema migrations on startup, and cleanup on shutdown.
     """
-    logger.info("Starting CodeGuard AI Backend...")
+    logger.info("Starting CodeGuard AI Backend v2.1...")
     init_db()
     yield
     logger.info("CodeGuard AI Backend shutdown complete.")
@@ -39,8 +41,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="CodeGuard AI API",
-    description="Production-grade Python static code analysis & security review engine.",
-    version="1.1.0",
+    description="Production-grade Python static code analysis & security review engine with OpenAI Assistant.",
+    version="2.1.0",
     lifespan=lifespan
 )
 
@@ -50,16 +52,18 @@ app.add_middleware(RateLimitingMiddleware)
 # 2. OWASP Security Headers Middleware (prevents clickjacking, MIME sniffing, XSS)
 app.add_middleware(SecurityHeadersMiddleware)
 
-# 3. Cross-Origin Resource Sharing (CORS) Middleware with strict origins
+# 3. Cross-Origin Resource Sharing (CORS) Middleware with strict origins and cookie credentials
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Cookie", "Accept"],
 )
 
 # Mount API routers
+app.include_router(auth_router)
+app.include_router(assistant_router)
 app.include_router(api_router)
 
 
